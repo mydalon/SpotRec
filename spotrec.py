@@ -40,6 +40,7 @@ app_version = "0.15.1"
 _debug_logging = False
 _skip_intro = False
 _mute_pa_recording_sink = False
+_new_songs = False
 _output_directory = f"{Path.home()}/{app_name}"
 _filename_pattern = "{trackNumber} - {artist} - {title}"
 _underscored_filenames = False
@@ -55,6 +56,7 @@ _playback_time_before_seeking_to_beginning = 5.0
 _shell_executable = "/bin/bash"  # Default: "/bin/sh"
 _shell_encoding = "utf-8"
 _ffmpeg_executable = "ffmpeg"  # Example: "/usr/bin/ffmpeg"
+_filename_extension = "flac"
 
 # Variables that change during runtime
 is_script_paused = False
@@ -70,7 +72,7 @@ def main():
     if not _skip_intro:
         print(app_name + " v" + app_version)
         print("You should not pause, seek or change volume during recording!")
-        print("Existing files will be overridden!")
+        print("Existing files will be overridden! (check option --new-songs if you don't want this)")
         print("Use --help as argument to see all options.")
         print()
         print("Disclaimer:")
@@ -126,6 +128,7 @@ def handle_command_line():
     global _debug_logging
     global _skip_intro
     global _mute_pa_recording_sink
+    global _new_songs
     global _output_directory
     global _filename_pattern
     global _underscored_filenames
@@ -140,6 +143,8 @@ def handle_command_line():
                         action="store_true", default=_skip_intro)
     parser.add_argument("-m", "--mute-recording", help="Mute Spotify on your main output device while recording",
                         action="store_true", default=_mute_pa_recording_sink)
+    parser.add_argument("-n", "--new-songs", help="Skip all songs that already exist",
+                        action="store_true", default=_new_songs)
     parser.add_argument("-o", "--output-directory", help="Where to save the recordings\n"
                                                          "Default: " + _output_directory, default=_output_directory)
     parser.add_argument("-p", "--filename-pattern", help="A pattern for the file names of the recordings\n"
@@ -161,6 +166,8 @@ def handle_command_line():
     _skip_intro = args.skip_intro
 
     _mute_pa_recording_sink = args.mute_recording
+
+    _new_songs = args.new_songs
 
     _filename_pattern = args.filename_pattern
 
@@ -304,6 +311,14 @@ class Spotify:
                 # Stop the recording before
                 # Use copy() to not change the list during this method runs
                 self.parent.stop_old_recording(FFmpeg.instances.copy())
+
+                # Do not overwrite existing files
+                if _new_songs:
+                    filename = os.path.join(_output_directory, self.parent.track) + "." + _filename_extension
+                    if os.path.isfile(filename):
+                        log.info("File exists...skipping song.")
+                        self.parent.send_dbus_cmd("Next")
+                        return
 
                 # This is currently the only way to seek to the beginning (let it Play for some seconds, Pause and send Previous)
                 time.sleep(_playback_time_before_seeking_to_beginning)
@@ -456,7 +471,7 @@ class FFmpeg:
         # Use a dot as filename prefix to hide the file until the recording was successful
         self.tmp_file_prefix = "."
         self.filename = self.tmp_file_prefix + \
-            os.path.basename(file) + ".flac"
+            os.path.basename(file) + "." + _filename_extension
 
         # save this to self because metadata_params is discarded after this function
         self.cover_url = metadata_for_file.pop('cover_url')
@@ -560,9 +575,9 @@ class FFmpeg:
         # save the image locally -> could use a temp file here
         #   but might add option to keep image later
         cover_file = fullfilepath.rsplit(
-            '.flac', 1)[0]  # remove the extension
+            '.' + _filename_extension, 1)[0]  # remove the extension
         log.debug(f'Saving cover art to {cover_file} + image_ext')
-        temp_file = cover_file + '_withArtwork.' + 'flac'
+        temp_file = cover_file + '_withArtwork.' + _filename_extension
         if self.cover_url.startswith('file://'):
             log.debug(f'[FFmpeg] Cover art is local for {fullfilepath}')
             path = self.cover_url[len('file://'):]
